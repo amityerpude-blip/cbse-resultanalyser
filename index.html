@@ -28,7 +28,53 @@
 const SUBJECTS={'101':'English Communicative','119':'Sanskrit','001':'English Elective','301':'English Core','002':'Hindi Course A','302':'Hindi Core','041':'Mathematics','042':'Physics','043':'Chemistry','044':'Biology','045':'Biotechnology','046':'Engineering Graphics','048':'Physical Education','049':'Painting','050':'Graphics','051':'Sculpture','052':'Applied/Commercial Art','030':'Economics','054':'Business Studies','055':'Accountancy','065':'Informatics Practices','083':'Computer Science','027':'History','028':'Political Science','029':'Geography','037':'Psychology','039':'Sociology','040':'Philosophy','064':'Home Science','066':'Entrepreneurship','067':'Multimedia & Web Technology','068':'Agriculture','073':'Knowledge Traditions & Practices of India','074':'Legal Studies','184':'English Language & Literature','085':'Hindi Course B','086':'Science','087':'Social Science','241':'Mathematics Basic','165':'Computer Applications','402':'Information Technology','417':'Artificial Intelligence'};
 let students=[],school='',classLevel='12',sectionOptions=['A','B','C','D','E','F'];const classData={};
 const $=id=>document.getElementById(id);
-function parseGazette(text){const lines=text.replace(/\r/g,'').split('\n');let out=[],currentSchool='';for(let i=0;i<lines.length;i++){const line=lines[i];const sm=line.match(/SCHOOL\s*:\s*-\s*(\d+)\s+(.+)/i);if(sm)currentSchool=sm[2].trim();const m=line.match(/^\s*(\d{8})\s+([MF])\s+(.+)$/);if(!m)continue;const cm=[...line.matchAll(/\b(\d{3})\b/g)];if(!cm.length)continue;const first=cm[0].index;const name=line.slice(line.indexOf(m[2])+2,first).trim().replace(/\s+/g,' ');const codes=cm.map(x=>x[1]);let pairs=[];for(let j=i+1;j<Math.min(i+4,lines.length);j++){const candidate=lines[j];const graded=[...candidate.matchAll(/\b(\d{2,3})\s+([A-E](?:[12])?)\b/g)];if(graded.length){pairs=graded.map(x=>({marks:Number(x[1]),grade:x[2]}));i=j;break;}const trimmed=candidate.trim();if(/^\d{2,3}(?:\s+\d{2,3}){4,6}\s*$/.test(trimmed)){pairs=trimmed.split(/\s+/).map(v=>({marks:Number(v),grade:''}));i=j;break;}}const subjects=codes.map((code,k)=>({code,name:SUBJECTS[code]||('Subject '+code),marks:pairs[k]?.marks??null,grade:pairs[k]?.grade??''})).filter(x=>x.marks!==null);const result=(line.match(/\b(PASS|COMP|ER|ABSENT)\b/)||[])[1]||'Not stated';out.push({roll:m[1],gender:m[2],name,subjects,result,school:currentSchool,section:''});}return{students:out,school:currentSchool};}
+function parseGazette(text){
+ const lines=text.replace(/\r/g,'').split('\n');
+ const out=[],seen=new Set();
+ let currentSchool='';
+ const candidateRe=/^\s*(\d{8})\s+([MF])\s+(.+?)\s*$/;
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i];
+  const sm=line.match(/SCHOOL\s*:\s*-\s*(\d+)\s+(.+)/i);
+  if(sm)currentSchool=sm[2].trim();
+  const m=line.match(candidateRe);
+  if(!m||seen.has(m[1]))continue;
+  // Subject codes are read from the candidate's own record, not from a fixed
+  // number of students or a fixed number of rows in the file.
+  const codes=[...line.matchAll(/\b(\d{3})\b/g)].map(x=>x[1]).filter(code=>Object.prototype.hasOwnProperty.call(SUBJECTS,code));
+  if(!codes.length)continue;
+  const firstCodeMatch=[...line.matchAll(/\b(\d{3})\b/g)].find(x=>codes.includes(x[1]));
+  const nameStart=line.indexOf(m[2]);
+  const nameEnd=firstCodeMatch?firstCodeMatch.index:line.length;
+  const name=line.slice(nameStart,nameEnd).trim().replace(/\s+/g,' ');
+  let pairs=[];
+  // Search only within this candidate's block. Never advance the outer loop
+  // to a marks row, because doing so can skip a following candidate record.
+  for(let j=i+1;j<Math.min(i+6,lines.length);j++){
+   const candidate=lines[j];
+   if(candidateRe.test(candidate))break;
+   const graded=[...candidate.matchAll(/\b(\d{1,3})\s+([A-E](?:[12])?)\b/g)];
+   if(graded.length>=Math.min(3,codes.length)){
+    pairs=graded.map(x=>({marks:Number(x[1]),grade:x[2]}));
+    break;
+   }
+   const trimmed=candidate.trim();
+   const numeric=trimmed.match(/^\d{1,3}(?:\s+\d{1,3}){2,}$/);
+   if(numeric){
+    const values=trimmed.split(/\s+/).map(Number);
+    if(values.length>=Math.min(3,codes.length)){
+     pairs=values.map(v=>({marks:v,grade:''}));
+     break;
+    }
+   }
+  }
+  const subjects=codes.map((code,k)=>({code,name:SUBJECTS[code]||('Subject '+code),marks:pairs[k]?.marks??null,grade:pairs[k]?.grade??''})).filter(x=>x.marks!==null);
+  const result=(line.match(/\b(PASS|COMP|ER|ABSENT)\b/i)||[])[1]?.toUpperCase()||'Not stated';
+  seen.add(m[1]);
+  out.push({roll:m[1],gender:m[2],name,subjects,result,school:currentSchool,section:''});
+ }
+ return{students:out,school:currentSchool};
+}
 
 const GRADE_WEIGHTS={A1:8,A2:7,B1:6,B2:5,C1:4,C2:3,D1:2,D2:1,E:0};
 function gradeFor(subject){if(GRADE_WEIGHTS[subject.grade]!==undefined)return subject.grade;const m=Number(subject.marks);if(m>=91)return 'A1';if(m>=81)return 'A2';if(m>=71)return 'B1';if(m>=61)return 'B2';if(m>=51)return 'C1';if(m>=41)return 'C2';if(m>=33)return 'D1';if(m>=21)return 'D2';return 'E';}
