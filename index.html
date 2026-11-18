@@ -32,24 +32,26 @@ function parseGazette(text){
  const lines=text.replace(/\r/g,'').split('\n');
  const out=[],seen=new Set();
  let currentSchool='';
- const candidateRe=/^\s*(\d{8})\s+([MF])\s+(.+?)\s*$/;
+ // CBSE gazettes may include an optional "I" flag between roll number and gender.
+ const candidateRe=/^\s*(\d{8})\s+(?:I\s+)?([MF])\s+(.+?)\s*$/;
  for(let i=0;i<lines.length;i++){
   const line=lines[i];
   const sm=line.match(/SCHOOL\s*:\s*-\s*(\d+)\s+(.+)/i);
   if(sm)currentSchool=sm[2].trim();
   const m=line.match(candidateRe);
   if(!m||seen.has(m[1]))continue;
-  // Subject codes are read from the candidate's own record, not from a fixed
-  // number of students or a fixed number of rows in the file.
-  const codes=[...line.matchAll(/\b(\d{3})\b/g)].map(x=>x[1]).filter(code=>Object.prototype.hasOwnProperty.call(SUBJECTS,code));
-  if(!codes.length)continue;
-  const firstCodeMatch=[...line.matchAll(/\b(\d{3})\b/g)].find(x=>codes.includes(x[1]));
-  const nameStart=line.indexOf(m[2]);
-  const nameEnd=firstCodeMatch?firstCodeMatch.index:line.length;
-  const name=line.slice(nameStart,nameEnd).trim().replace(/\s+/g,' ');
+  // Subject codes appear after the candidate name and before the result.
+  // Keep unknown three-digit codes too, rather than silently dropping subjects.
+  const record=m[3];
+  const resultMatch=record.match(/\b(PASS|COMP|ER|ABSENT)\b/i);
+  const subjectPart=resultMatch?record.slice(0,resultMatch.index):record;
+  const codeMatches=[...subjectPart.matchAll(/\b(\d{3})\b/g)];
+  if(!codeMatches.length)continue;
+  const name=subjectPart.slice(0,codeMatches[0].index).trim().replace(/\s+/g,' ');
+  const codes=codeMatches.map(x=>x[1]);
   let pairs=[];
-  // Search only within this candidate's block. Never advance the outer loop
-  // to a marks row, because doing so can skip a following candidate record.
+  // Marks/grades are on the next line in this gazette. Search only until
+  // the next candidate so marks can never be assigned to the wrong student.
   for(let j=i+1;j<Math.min(i+6,lines.length);j++){
    const candidate=lines[j];
    if(candidateRe.test(candidate))break;
@@ -69,7 +71,7 @@ function parseGazette(text){
    }
   }
   const subjects=codes.map((code,k)=>({code,name:SUBJECTS[code]||('Subject '+code),marks:pairs[k]?.marks??null,grade:pairs[k]?.grade??''})).filter(x=>x.marks!==null);
-  const result=(line.match(/\b(PASS|COMP|ER|ABSENT)\b/i)||[])[1]?.toUpperCase()||'Not stated';
+  const result=(resultMatch?.[1]||'Not stated').toUpperCase();
   seen.add(m[1]);
   out.push({roll:m[1],gender:m[2],name,subjects,result,school:currentSchool,section:''});
  }
